@@ -1,54 +1,137 @@
-const ARTIST='86119d30-d930-4e65-a97a-e31e22388166';
+const SUPABASE_URL='https://eiicksuerfxfkqcweeap.supabase.co';
+const SUPABASE_KEY='sb_publishable_Qs3DqwEpzYE20O6xgLuS4g_N_avZtVS';
 const MB='https://musicbrainz.org/ws/2';
-const FAMOUS=['我的快樂時代','我的快乐时代','天佑愛人','天佑爱人','幸福','nothing really matters','打得火熱','打得火热','shall we dance','the easy ride','the line-up','live for today','u87','what’s going on',"what's going on",'listen to eason chan','h³m','h3m','time flies','stranger under my skin','3mm','the key','準備中','准备中','c’mon in',"c'mon in",'l.o.v.e','chin up'];
-const state={albums:[],choices:[{},{}],tracks:{},active:null,challenge:false};
+const ARTIST='86119d30-d930-4e65-a97a-e31e22388166';
+const POPULAR=['what’s going on',"what's going on",'the key','stranger under my skin','u87','h³m','h3m','time flies','shall we dance','c’mon in',"c'mon in"];
+const db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const state={user:null,room:null,channel:null,catalog:[],tracks:{},busy:false};
 const $=s=>document.querySelector(s);
-const grid=$('#albumGrid'),status=$('#status'),songDialog=$('#songDialog');
+const views=['home','waiting','game','result'];
 const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cover=id=>`https://coverartarchive.org/release-group/${id}/front-500`;
+const key=s=>s.toLowerCase().replace(/[\s·・,.!?！？。，「」『』'"’…\-()（）~]/g,'');
+const show=id=>views.forEach(v=>$('#'+v).classList.toggle('hidden',v!==id));
+function toast(text){const el=$('#toast');el.textContent=text;el.classList.remove('hidden');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.add('hidden'),1800)}
+function name(){return $('#playerName').value.trim()||'匿名听众'}
+function shuffled(a){a=[...a];for(let i=a.length-1;i;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+async function json(url,retry=true){const r=await fetch(url,{headers:{Accept:'application/json'}});if(!r.ok){if(retry){await new Promise(x=>setTimeout(x,700));return json(url,false)}throw Error(r.status)}return r.json()}
 
-function toast(msg){const el=document.createElement('div');el.className='toast';el.textContent=msg;document.body.append(el);setTimeout(()=>el.remove(),1800)}
-async function getJSON(url){const r=await fetch(url,{headers:{Accept:'application/json'}});if(!r.ok)throw new Error(r.status);return r.json()}
+async function loadTracks(album){
+  const releases=await json(`${MB}/release?release-group=${album.id}&status=official&limit=100&fmt=json`);
+  const priority=['HK','TW','CN','XW'];
+  const rel=(releases.releases||[]).sort((a,b)=>(priority.indexOf(a.country)<0?9:priority.indexOf(a.country))-(priority.indexOf(b.country)<0?9:priority.indexOf(b.country)))[0];
+  if(!rel)return [];
+  const full=await json(`${MB}/release/${rel.id}?inc=recordings&fmt=json`);
+  return (full.media||[]).flatMap(m=>m.tracks||[]);
+}
+async function loadCatalog(){
+  const cached=localStorage.getItem('oneone-catalog-v4');
+  if(cached){try{const x=JSON.parse(cached);state.catalog=x.catalog;state.tracks=x.tracks;if(state.catalog.length>=7)return}catch{}}
+  $('#authStatus').textContent='正在整理曲库';
+  const data=await json(`${MB}/release-group?artist=${ARTIST}&type=album|ep&limit=100&fmt=json`);
+  const albums=(data['release-groups']||[]).filter(a=>POPULAR.some(n=>a.title.toLowerCase().includes(n))).sort((a,b)=>(a['first-release-date']||'9999').localeCompare(b['first-release-date']||'9999'));
+  const seen=new Set();
+  for(const album of albums){
+    try{state.tracks[album.id]=(await loadTracks(album)).filter(t=>{const k=key(t.title);if(seen.has(k))return false;seen.add(k);return true})}catch{state.tracks[album.id]=[]}
+  }
+  state.catalog=albums;
+  localStorage.setItem('oneone-catalog-v4',JSON.stringify({catalog:albums,tracks:state.tracks}));
+}
 
-async function loadAlbums(){
+async function init(){
+  $('#playerName').value=localStorage.getItem('oneone-name')||'我';
   try{
-    const data=await getJSON(`${MB}/release-group?artist=${ARTIST}&type=album|ep&limit=100&fmt=json`);
-    const selected=(data['release-groups']||[]).filter(a=>['Album','EP'].includes(a['primary-type'])&&FAMOUS.some(n=>a.title.toLowerCase().includes(n)));
-    await buildCatalog(selected);
-    state.albums=shuffle(selected);status.hidden=true;render();decodeChallenge();
-  }catch(e){status.innerHTML='唱片資料暫時載入不到。<button class="text-btn" onclick="loadAlbums()">再試一次</button>'}
+    const {data:{session}}=await db.auth.getSession();
+    let current=session;
+    if(!current){const {data,error}=await db.auth.signInAnonymously();if(error)throw error;current=data.session}
+    state.user=current.user;$('#authStatus').textContent='实时服务已连接';
+    await loadCatalog();
+    const saved=localStorage.getItem('oneone-room');
+    if(saved){const {data}=await db.from('rooms').select('*').eq('id',saved).maybeSingle();if(data&&[data.player1,data.player2].includes(state.user.id)){await enterRoom(data);return}localStorage.removeItem('oneone-room')}
+  }catch(e){$('#authStatus').textContent='等待 Supabase 初始化';$('#lobbyMessage').textContent='实时功能尚未初始化，请先执行仓库内的 supabase.sql 并开启匿名登录。'}
+}
+function requireReady(){if(!state.user){toast('实时服务尚未准备好');return false}if(state.catalog.length<2){toast('曲库还在整理，请稍等');return false}localStorage.setItem('oneone-name',name());return true}
+function roomCode(){return String(Math.floor(100000+Math.random()*900000))}
+async function createRoom(mode,id=roomCode()){
+  if(!requireReady()||state.busy)return;state.busy=true;
+  const payload={id,mode,status:'waiting',player1:state.user.id,player1_name:name(),album_order:shuffled(state.catalog.map(a=>a.id))};
+  const {data,error}=await db.from('rooms').insert(payload).select().single();state.busy=false;
+  if(error){toast(error.code==='23505'?'房间号已存在，请再试一次':'创建失败，请检查后台设置');return}
+  await enterRoom(data);
+}
+async function joinRoom(id){
+  if(!requireReady()||state.busy)return;id=id.replace(/\D/g,'').slice(0,6);if(id.length!==6)return toast('请输入 6 位房间号');state.busy=true;
+  let {data:room,error}=await db.from('rooms').select('*').eq('id',id).maybeSingle();
+  if(error||!room){state.busy=false;return toast('没有找到这个房间')}
+  if(room.player1===state.user.id||room.player2===state.user.id){state.busy=false;return enterRoom(room)}
+  if(room.player2||room.status!=='waiting'){state.busy=false;return toast('这个房间已经开始了')}
+  const res=await db.from('rooms').update({player2:state.user.id,player2_name:name(),status:'playing'}).eq('id',id).is('player2',null).select().maybeSingle();state.busy=false;
+  if(res.error||!res.data)return toast('刚刚有人先加入了这个房间');
+  await enterRoom(res.data);
+}
+async function randomMatch(){
+  if(!requireReady()||state.busy)return;state.busy=true;
+  const since=new Date(Date.now()-10*60*1000).toISOString();
+  const {data}=await db.from('rooms').select('*').eq('mode','random').eq('status','waiting').neq('player1',state.user.id).gte('created_at',since).order('created_at').limit(1);
+  state.busy=false;
+  if(data?.[0])return joinRoom(data[0].id);
+  await createRoom('random');
 }
 
-const trackKey=s=>s.toLowerCase().replace(/[\s·・,.!?！？。，「」『』'"’…\-()（）]/g,'');
-async function loadAlbumTracks(album){const releases=await getJSON(`${MB}/release?release-group=${album.id}&status=official&limit=100&fmt=json`);const rel=(releases.releases||[]).sort((a,b)=>{const p=['HK','TW','CN','XW'];return (p.indexOf(a.country)<0?9:p.indexOf(a.country))-(p.indexOf(b.country)<0?9:p.indexOf(b.country))})[0];if(!rel)return [];const full=await getJSON(`${MB}/release/${rel.id}?inc=recordings&fmt=json`);return (full.media||[]).flatMap(m=>m.tracks||[])}
-async function buildCatalog(albums){const version='famous-v2',cached=localStorage.getItem(version);if(cached){try{state.tracks=JSON.parse(cached);if(albums.every(a=>state.tracks[a.id]))return}catch{}}const seen=new Set(),ordered=[...albums].sort((a,b)=>(a['first-release-date']||'9999').localeCompare(b['first-release-date']||'9999'));for(let i=0;i<ordered.length;i++){status.innerHTML='<span class="loader"></span> 正在整理代表作 '+(i+1)+' / '+ordered.length+'…';try{const tracks=await loadAlbumTracks(ordered[i]);state.tracks[ordered[i].id]=tracks.filter(t=>{const key=trackKey(t.title);if(seen.has(key))return false;seen.add(key);return true})}catch{state.tracks[ordered[i].id]=[]}}localStorage.setItem(version,JSON.stringify(state.tracks))}
-function shuffle(items){const a=[...items];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
-function render(){
-  grid.innerHTML='';
-  state.albums.forEach(a=>{
-    const node=$('#albumTemplate').content.cloneNode(true),card=node.querySelector('.album-card');card.dataset.id=a.id;
-    const img=node.querySelector('.cover');img.src=cover(a.id);img.alt=`${a.title} 專輯封面`;img.onerror=()=>{img.onerror=null;img.src='data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><rect width="100%" height="100%" fill="#ded6cb"/><text x="50%" y="48%" text-anchor="middle" font-family="serif" font-size="34" fill="#37322d">${esc(a.title).slice(0,18)}</text><text x="50%" y="57%" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#777">EASON CHAN</text></svg>`)};
-    node.querySelector('.year').textContent=(a['first-release-date']||'—').slice(0,4);node.querySelector('.album-meta h3').textContent=a.title;node.querySelector('.type').textContent=a['primary-type']==='EP'?'迷你專輯 · EP':'錄音室專輯';
-    [0,1].forEach(p=>{const btn=node.querySelector(`.p${p+1}`);btn.querySelector('.who').textContent=$(`#name${p+1}`).value||`玩家 ${p+1}`;const choice=state.choices[p][a.id];if(choice){btn.classList.add('done');btn.querySelector('.chosen').textContent=choice.title}if(state.challenge&&p===0)btn.disabled=true;btn.onclick=()=>openAlbum(a,p)});grid.append(node);
-  });updateProgress();
+async function enterRoom(room){
+  state.room=room;localStorage.setItem('oneone-room',room.id);
+  if(state.channel)await db.removeChannel(state.channel);
+  state.channel=db.channel('room-'+room.id).on('postgres_changes',{event:'UPDATE',schema:'public',table:'rooms',filter:`id=eq.${room.id}`},p=>{state.room=p.new;renderRoom()}).subscribe(status=>{$('#onlineDot').style.background=status==='SUBSCRIBED'?'#51c878':'#e2aa42'});
+  renderRoom();
 }
+function mySlot(){return state.room?.player1===state.user.id?'p1':'p2'}
+function otherSlot(){return mySlot()==='p1'?'p2':'p1'}
+function currentAlbum(){const id=state.room?.album_order?.[state.room.current_index];return state.catalog.find(a=>a.id===id)}
+function choice(albumId,slot){return state.room?.choices?.[albumId]?.[slot]}
+function displayChoice(c){return c?.pass?'PASS':c?.title||''}
 
-async function openAlbum(album,player){
-  state.active={album,player};$('#dialogCover').src=cover(album.id);$('#dialogTitle').textContent=album.title;$('#dialogYear').textContent=(album['first-release-date']||'').slice(0,4);$('#dialogHint').textContent=`${$(`#name${player+1}`).value||`玩家 ${player+1}`}，請選出你最喜歡的一首`;
-  const list=$('#trackList');list.innerHTML='<div class="status"><span class="loader"></span> 正在取出曲目…</div>';songDialog.showModal();
-  try{const tracks=state.tracks[album.id]||[];if(!tracks.length)throw 0;list.innerHTML=tracks.map((t,i)=>`<button class="track" data-i="${i}"><span class="num">${String(i+1).padStart(2,'0')}</span><span>${esc(t.title)}</span><span class="duration">${t.length?Math.floor(t.length/60000)+':'+String(Math.floor(t.length/1000)%60).padStart(2,'0'):''}</span></button>`).join('');list.querySelectorAll('.track').forEach((b,i)=>b.onclick=()=>choose({title:tracks[i].title,id:tracks[i].recording?.id||tracks[i].id}));
-  }catch(e){list.innerHTML='<div class="status">這張唱片暫時找不到曲目資料。</div>'}
+function renderRoom(){
+  const r=state.room;if(!r)return;
+  $('#waitingCode').textContent=r.id;$('#roomBadge').textContent='# '+r.id;
+  if(r.status==='waiting'||!r.player2){show('waiting');$('#waitingTitle').textContent=r.mode==='random'?'正在寻找另一位听众…':'等待朋友加入…';return}
+  if(r.status==='finished'||r.current_index>=r.album_order.length){renderResult();return}
+  show('game');
+  const mine=mySlot(),other=otherSlot(),peer=other==='p1'?r.player1_name:r.player2_name;
+  $('#peerName').textContent=peer||'另一位听众';$('#roomState').textContent='在线房间';
+  const current=currentAlbum();if(!current){$('#chat').innerHTML='<div class="album-post"><p>正在同步唱片资料…</p></div>';return}
+  const history=r.album_order.slice(0,r.current_index).map((id,i)=>{
+    const a=state.catalog.find(x=>x.id===id),m=choice(id,mine),o=choice(id,other);if(!a)return '';
+    return `<div class="history-divider">${String(i+1).padStart(2,'0')} · ${esc(a.title)}</div><div class="bubble-row"><div class="bubble"><small>${esc(peer)}</small>${esc(displayChoice(o))}</div></div><div class="bubble-row mine"><div class="bubble"><small>${esc(name())}</small>${esc(displayChoice(m))}</div></div>`
+  }).join('');
+  const myChoice=choice(current.id,mine),peerChoice=choice(current.id,other);
+  $('#chat').innerHTML=history+`<article class="album-post"><img src="${cover(current.id)}" alt="${esc(current.title)} 封面"><div class="count">ALBUM ${r.current_index+1} / ${r.album_order.length}</div><h2>${esc(current.title)}</h2><p>${(current['first-release-date']||'').slice(0,4)} · 选出这一张你最喜欢的一首</p></article>`+(peerChoice?`<div class="bubble-row"><div class="bubble"><small>${esc(peer)}</small>${esc(displayChoice(peerChoice))}</div></div>`:`<div class="bubble-row"><div class="bubble waiting-choice"><small>${esc(peer)}</small>还在选择…</div></div>`)+(myChoice?`<div class="bubble-row mine"><div class="bubble"><small>${esc(name())}</small>${esc(displayChoice(myChoice))}</div></div>`:'');
+  $('#songInput').disabled=!!myChoice;$('#passGame').disabled=!!myChoice;$('#songInput span').textContent=myChoice?'已提交，等待对方…':'选择这一张的歌…';
+  requestAnimationFrame(()=>{$('#chat').scrollTop=$('#chat').scrollHeight});
 }
-function choose(track){const {album,player}=state.active;state.choices[player][album.id]=track;songDialog.close();render();save()}
-function passAlbum(){choose({title:'PASS',pass:true})}
-function updateProgress(){const total=state.albums.length*2,done=Object.keys(state.choices[0]).length+Object.keys(state.choices[1]).length;$('#progress').textContent=`${done} / ${total}`}
-function save(){localStorage.setItem('one-one-eason',JSON.stringify({choices:state.choices,names:[$('#name1').value,$('#name2').value]}))}
-function restore(){try{const x=JSON.parse(localStorage.getItem('one-one-eason'));if(x&&!location.hash){state.choices=x.choices||state.choices;$('#name1').value=x.names?.[0]||'我';$('#name2').value=x.names?.[1]||'朋友'}}catch{}}
-function results(){const completed=state.albums.filter(a=>state.choices[0][a.id]&&state.choices[1][a.id]);const missing=state.albums.length-completed.length;if(missing)return toast('還有 '+missing+' 張專輯未完成');const compared=completed.filter(a=>!state.choices[0][a.id].pass&&!state.choices[1][a.id].pass);const same=compared.filter(a=>state.choices[0][a.id].title===state.choices[1][a.id].title);const n=compared.length?Math.round(same.length/compared.length*100):0;$('#score').textContent=n+'%';$('#scoreTitle').textContent=n>=70?'你們根本共用一副耳機':n>=40?'在不少旋律上相遇了':n?'不同品味，也有交集':'兩套完全不同的歌單';$('#scoreCopy').textContent=`全部 ${completed.length} 張專輯已完成，其中 ${same.length} 張選了同一首。`;$('#matches').innerHTML=same.length?same.map(a=>`<div class="match"><img src="${cover(a.id)}" alt=""><div><strong>${esc(a.title)}</strong><span>${esc(state.choices[0][a.id].title)}</span></div></div>`).join(''):'<p>還沒有選到相同的歌，繼續選下去看看。</p>';$('#resultDialog').showModal()}
-function challengeLink(){const payload={n:$('#name1').value,c:state.choices[0]};const hash=btoa(unescape(encodeURIComponent(JSON.stringify(payload)))).replace(/=+$/,'');return `${location.origin}${location.pathname}#challenge=${hash}`}
-async function share(){if(!Object.keys(state.choices[0]).length)return toast('第一位玩家要先選歌');const url=challengeLink();try{await navigator.clipboard.writeText(url);toast('挑戰連結已複製')}catch{prompt('複製這個連結給朋友：',url)}}
-function decodeChallenge(){if(!location.hash.startsWith('#challenge='))return;try{const raw=location.hash.slice(11),p=JSON.parse(decodeURIComponent(escape(atob(raw.replace(/-/g,'+').replace(/_/g,'/')))));state.choices[0]=p.c||{};state.challenge=true;$('#name1').value=p.n||'朋友';$('#name1').disabled=true;$('#name2').value='我';render();toast('好友的選擇已藏好，輪到你了')}catch{}}
+function openSongs(){
+  const album=currentAlbum();if(!album||choice(album.id,mySlot()))return;
+  $('#sheetAlbum').textContent=album.title;
+  const tracks=state.tracks[album.id]||[];
+  $('#trackList').innerHTML=tracks.map((t,i)=>{const q=encodeURIComponent('陈奕迅 '+t.title);return `<div class="track"><span class="track-num">${String(i+1).padStart(2,'0')}</span><button data-i="${i}">${esc(t.title)}</button><span class="links"><a target="_blank" rel="noopener" href="https://music.163.com/#/search/m/?s=${q}&type=1">网易云</a><a target="_blank" rel="noopener" href="https://www.youtube.com/results?search_query=${q}">YT</a><a target="_blank" rel="noopener" href="https://music.apple.com/hk/search?term=${q}">Apple</a></span></div>`}).join('')||'<p class="hint">这张专辑暂时没有曲目资料，可以选择 PASS。</p>';
+  $('#trackList').querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>submit({title:tracks[+b.dataset.i].title,id:tracks[+b.dataset.i].recording?.id}));
+  $('#songs').showModal();
+}
+async function submit(selected){
+  if(state.busy)return;const album=currentAlbum();if(!album)return;state.busy=true;$('#songs').close();
+  const {data,error}=await db.rpc('submit_choice',{p_room:state.room.id,p_album:album.id,p_choice:selected});
+  state.busy=false;if(error)return toast('提交失败，请重试');if(data){state.room=Array.isArray(data)?data[0]:data;renderRoom()}
+}
+function renderResult(){
+  show('result');const r=state.room,mine=mySlot(),other=otherSlot();
+  const played=r.album_order.map(id=>({id,a:state.catalog.find(x=>x.id===id),m:choice(id,mine),o:choice(id,other)}));
+  const compared=played.filter(x=>x.m&&!x.m.pass&&x.o&&!x.o.pass),same=compared.filter(x=>key(x.m.title)===key(x.o.title));
+  const score=compared.length?Math.round(same.length/compared.length*100):0;
+  $('#score').textContent=score+'%';$('#resultTitle').textContent=score>=65?'你们听见了相似的陈奕迅':score>=35?'有些歌，刚好想到一起':'两份很不一样的歌单';
+  $('#resultCopy').textContent=`共同选择了 ${compared.length} 张专辑，有 ${same.length} 次选择相同。`;
+  $('#resultList').innerHTML=played.filter(x=>x.a).map(x=>`<div class="result-item"><b>${esc(x.a.title)}</b><span>${esc(displayChoice(x.m))} · ${esc(displayChoice(x.o))}</span></div>`).join('');
+  localStorage.removeItem('oneone-room');
+}
+async function leave(){if(state.channel)await db.removeChannel(state.channel);state.channel=null;state.room=null;localStorage.removeItem('oneone-room');show('home')}
 
-$('#passBtn').onclick=passAlbum;
-document.querySelectorAll('dialog .close').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('#startBtn').onclick=()=>{$('#picker').classList.remove('hidden');$('#picker').scrollIntoView()};$('#aboutBtn').onclick=()=>$('#aboutDialog').showModal();$('#resultBtn').onclick=results;$('#shareBtn').onclick=share;$('#resetBtn').onclick=()=>{if(confirm('清除目前所有選擇？')){state.choices=[{},{}];localStorage.removeItem('one-one-eason');location.hash='';location.reload()}};[$('#name1'),$('#name2')].forEach(x=>x.oninput=()=>{render();save()});restore();loadAlbums();
-
+$('#matchBtn').onclick=randomMatch;$('#createBtn').onclick=()=>createRoom('private');$('#joinBtn').onclick=()=>joinRoom($('#roomInput').value);$('#roomInput').onkeydown=e=>{if(e.key==='Enter')joinRoom(e.target.value)};$('#copyCode').onclick=async()=>{await navigator.clipboard.writeText(state.room.id);toast('房间号已复制')};document.querySelectorAll('.leave').forEach(b=>b.onclick=leave);$('#roomBadge').onclick=async()=>{await navigator.clipboard.writeText(state.room.id);toast('房间号已复制')};$('#songInput').onclick=openSongs;$('#passGame').onclick=()=>submit({title:'PASS',pass:true});$('#songs .close').onclick=()=>$('#songs').close();$('#homeBtn').onclick=leave;
+init();
