@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f4efe8" />
+  <title>One Album, One Song · 陳奕迅</title>
+  <meta name="description" content="和朋友一起，從陳奕迅的每張專輯選出最喜歡的一首歌。" />
+  <link rel="preconnect" href="https://coverartarchive.org" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <header class="hero">
+    <nav><span class="brand">ONE / ONE</span><button id="aboutBtn" class="text-btn">玩法</button></nav>
+    <div class="hero-copy">
+      <p class="eyebrow">EASON CHAN · DISCOGRAPHY</p>
+      <h1>每張專輯，<br><em>只留一首。</em></h1>
+      <p class="lede">全部專輯隨機出場。兩個人逐張選出最喜歡的歌，<br>完成整套唱片後，才揭曉你們的默契。</p>
+      <button id="startBtn" class="primary">開始選歌 <span>→</span></button>
+    </div>
+    <div class="vinyl" aria-hidden="true"><div class="vinyl-label">EASON<br>ONE / ONE</div></div>
+  </header>
+
+  <main id="picker" class="picker hidden">
+    <section class="control-bar">
+      <div>
+        <p class="eyebrow">YOUR SESSION</p>
+        <h2>你們的選擇</h2>
+      </div>
+      <div class="players">
+        <label><span class="dot coral"></span><input id="name1" maxlength="12" value="我" aria-label="第一位玩家名字"></label>
+        <label><span class="dot blue"></span><input id="name2" maxlength="12" value="朋友" aria-label="第二位玩家名字"></label>
+      </div>
+      <button id="resultBtn" class="result-btn">查看默契 <span id="progress">0 / 0</span></button>
+    </section>
+
+    <div id="status" class="status"><span class="loader"></span> 正在整理唱片架…</div>
+    <section id="albumGrid" class="album-grid" aria-live="polite"></section>
+  </main>
+
+  <dialog id="songDialog">
+    <button class="close" aria-label="關閉">×</button>
+    <div class="dialog-album"><img id="dialogCover" alt=""><div><p id="dialogYear" class="eyebrow"></p><h3 id="dialogTitle"></h3><p id="dialogHint"></p></div></div>
+    <div id="trackList" class="track-list"></div>
+  </dialog>
+
+  <dialog id="resultDialog" class="results">
+    <button class="close" aria-label="關閉">×</button>
+    <p class="eyebrow">TASTE MATCH</p>
+    <div id="score" class="score">—</div>
+    <h3 id="scoreTitle">你們的默契</h3>
+    <p id="scoreCopy"></p>
+    <div id="matches" class="matches"></div>
+    <div class="result-actions"><button id="shareBtn" class="primary">複製挑戰連結</button><button id="resetBtn" class="secondary">重新選擇</button></div>
+  </dialog>
+
+  <dialog id="aboutDialog" class="about">
+    <button class="close" aria-label="關閉">×</button><p class="eyebrow">HOW TO PLAY</p><h3>兩個人，一張唱片，一首歌。</h3>
+    <ol><li>專輯會在每次遊戲中完全隨機排列。</li><li>兩位玩家都要從每張專輯的完整曲目中選一首。</li><li>全部完成後才能揭曉默契，也可複製連結讓朋友接力。</li></ol>
+    <p class="fine">唱片與曲目資料來自 MusicBrainz，封面來自 Cover Art Archive。本站不提供音訊播放。</p>
+  </dialog>
+
+  <template id="albumTemplate"><article class="album-card"><div class="cover-wrap"><img class="cover" loading="lazy" alt=""><span class="year"></span></div><div class="album-meta"><h3></h3><p class="type"></p></div><div class="choices"><button class="pick p1"><span class="who"></span><span class="chosen">選一首</span></button><button class="pick p2"><span class="who"></span><span class="chosen">選一首</span></button></div></article></template>
+  <script src="app.js"></script>
+</body>
+</html>
