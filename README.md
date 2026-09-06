@@ -1,9 +1,13 @@
-# One Album, One Song
+# ONE / ONE · Eason
 
-和朋友一起，從陳奕迅的每張專輯選出最喜歡的一首歌，再比較彼此的音樂默契。
+一个双人实时选歌小游戏：从 8 张陈奕迅代表专辑中逐张选择最喜欢的一首，支持陌生人匹配、私人房间、PASS、进度恢复和网易云／YouTube／Apple Music 搜索预览。
 
-網站使用 MusicBrainz 的公開曲目資料與 Cover Art Archive 的專輯封面，不提供或儲存音訊。
+## 启用实时功能
 
-## GitHub Pages
+1. 打开 Supabase 项目的 **Authentication → Sign In / Providers → Anonymous Sign-Ins** 并启用。
+2. 打开 **SQL Editor**，复制并执行 [supabase.sql](./supabase.sql) 的全部内容。
+3. GitHub Pages 会自动发布前端。
 
-在倉庫 **Settings → Pages** 中選擇 **Deploy from a branch**，來源設為 `main` / `(root)`。
+前端只使用 Supabase publishable key；不要在仓库放入 service role key 或数据库密码。
+
+曲目资料来自 MusicBrainz，封面来自 Cover Art Archive。网站不储存或提供音讯。
